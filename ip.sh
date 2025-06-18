@@ -4,13 +4,21 @@
 # Requires: curl, jq
 
 DEPENDENCIES="jq curl"
+INSTALL_CONFIRM="yes"
 
-SOCKS_PORT=""
 while [ $# -gt 0 ]; do
   case "$1" in
     --socks | --socks-port | -s)
       SOCKS_PORT="$2"
       shift 2
+      ;;
+    -y)
+      INSTALL_CONFIRM="yes"
+      shift
+      ;;
+    -n)
+      INSTALL_CONFIRM="no"
+      shift
       ;;
     *)
       shift
@@ -34,6 +42,7 @@ SERVICES=(
   "youtube.com:youtube_lookup:youtube_lookup_v6"
   "netflix.com:netflix_lookup:netflix_lookup_v6"
   "apple.com:apple_lookup:apple_lookup_v6"
+  "discord.com:discord_lookup:discord_lookup_v6"
   "ipapi.com:ipapi_com_lookup:ipapi_com_lookup_v6"
   "db-ip.com:db_ip_com_lookup:db_ip_com_lookup_v6"
   "ipdata.co:ipdata_co_lookup:ipdata_co_lookup_v6"
@@ -53,6 +62,9 @@ SERVICES=(
   "ipbase.com:ipbase_com_lookup:ipbase_com_lookup_v6"
   "ip.sb:ip_sb_lookup:ip_sb_lookup_v6"
   "maxmind.com:maxmind_com_lookup:maxmind_com_lookup_v6"
+  "ip2location.com:ip2location_com_lookup:ip2location_com_lookup_v6"
+  "iplocation.net:iplocation_net_lookup:iplocation_net_lookup_v6"
+  "ipstack.com:ipstack_com_lookup:ipstack_com_lookup_v6"
 )
 
 IDENTITY_SERVICES="https://ident.me https://ifconfig.me https://api64.ipify.org"
@@ -73,7 +85,7 @@ progress_bar() {
   local empty=$((width - filled))
   local bar=$(printf "%${filled}s" | tr ' ' '#')
   local spaces=$(printf "%${empty}s" | tr ' ' '-')
-  printf "\rProgress: [${bar}${spaces}] %d%%" "$percent"
+  printf "\rProgress: [${bar}${spaces}] %d%% Checking: %s" "$percent" "[$3]"
 }
 
 log_message() {
@@ -105,20 +117,13 @@ install_dependencies() {
     return 0
   fi
 
-  log_message "INFO" "Missing dependencies: ${missing_packages[*]}. Do you want to install them?"
-  select option in "Yes" "No"; do
-    case "$option" in
-      "Yes")
-        log_message "INFO" "Installing missing dependencies"
-        break
-        ;;
-      "No")
-        log_message "INFO" "Exiting script"
-        exit 0
-        ;;
-    esac
-  done </dev/tty
+  log_message "INFO" "Missing dependencies: ${missing_packages[*]}."
+  if [ "$INSTALL_CONFIRM" == "no" ]; then
+    log_message "INFO" "Exiting script due to -n flag"
+    exit 0
+  fi
 
+  log_message "INFO" "Installing missing dependencies"
   if [ -d /data/data/com.termux ]; then
     log_message "INFO" "Detected Termux environment"
     apt update
@@ -214,11 +219,11 @@ print_results() {
   get_asn "$external_ip"
   if [ -n "$IPV6_ADDR" ]; then
     printf "\n\n%bResults for IP %b%s %s %s%b\n\n" "${COLOR_BOLD_GREEN}" "${COLOR_BOLD_CYAN}" "$hidden_ip" "and" "$hidden_ipv6" "${COLOR_RESET}"
-    printf "%bASN:%b %s, %s%b\n\n" "$COLOR_BOLD_GREEN" "$COLOR_BOLD_CYAN" "$asn" "$asn_owner" "$COLOR_RESET"
+    printf "%bASN:%b %s, %s%b\n\n" "$COLOR_BOLD_GREEN" "$COLOR_BOLD_CYAN" "$asn" "$asn_owner" "${COLOR_RESET}"
     printf "                        IPv4      IPv6\n\n"
   else
     printf "\n\n%bResults for IP %b%s%b\n\n" "${COLOR_BOLD_GREEN}" "${COLOR_BOLD_CYAN}" "$hidden_ip" "${COLOR_RESET}"
-    printf "%bASN:%b %s, %s%b\n\n" "$COLOR_BOLD_GREEN" "$COLOR_BOLD_CYAN" "$asn" "$asn_owner" "$COLOR_RESET"
+    printf "%bASN:%b %s, %s%b\n\n" "$COLOR_BOLD_GREEN" "$COLOR_BOLD_CYAN" "$asn" "$asn_owner" "${COLOR_RESET}"
     printf "                        IPv4\n\n"
   fi
 
@@ -228,7 +233,17 @@ print_results() {
   printf "\n"
 }
 
-# Lookup functions (unchanged for brevity, included only those used)
+# Lookup functions
+discord_lookup() {
+  result=$(timeout 3 curl -4 -s "https://discord.com/api/v9/users/@me/settings" -H "User-Agent: ${USER_AGENT}" | jq -r ".locale" | grep -oP '^[A-Z]{2}' 2>/dev/null)
+  [[ $? -eq 124 || "$result" == "null" || ${#result} -gt 7 ]] && echo "" || echo "$result"
+}
+
+discord_lookup_v6() {
+  result=$(timeout 3 curl -6 -s "https://discord.com/api/v9/users/@me/settings" -H "User-Agent: ${USER_AGENT}" | jq -r ".locale" | grep -oP '^[A-Z]{2}' 2>/dev/null)
+  [[ $? -eq 124 || "$result" == "null" || ${#result} -gt 7 ]] && echo "" || echo "$result"
+}
+
 ripe_rdap_lookup() {
   result=$(timeout 3 curl -4 -s "https://rdap.db.ripe.net/ip/$external_ip" | jq -r ".country" 2>/dev/null)
   [[ $? -eq 124 || "$result" == "null" || ${#result} -gt 7 ]] && echo "" || echo "$result"
@@ -529,6 +544,38 @@ maxmind_com_lookup_v6() {
   [[ $? -eq 124 || "$result" == "null" || ${#result} -gt 7 ]] && echo "" || echo "$result"
 }
 
+ip2location_com_lookup() {
+  result=$(timeout 3 curl -4 -s "https://api.ip2location.io/?ip=$external_ip" | jq -r ".country_code" 2>/dev/null)
+  [[ $? -eq 124 || "$result" == "null" || ${#result} -gt 7 ]] && echo "" || echo "$result"
+}
+
+ip2location_com_lookup_v6() {
+  result=$(timeout 3 curl -4 -s "https://api.ip2location.io/?ip=$external_ipv6" | jq -r ".country_code" 2>/dev/null)
+  [[ $? -eq 124 || "$result" == "null" || ${#result} -gt 7 ]] && echo "" || echo "$result"
+}
+
+iplocation_net_lookup() {
+  result=$(timeout 3 curl -4 -s "https://api.iplocation.net/?ip=$external_ip" | jq -r ".country_code2" 2>/dev/null)
+  [[ $? -eq 124 || "$result" == "null" || ${#result} -gt 7 ]] && echo "" || echo "$result"
+}
+
+iplocation_net_lookup_v6() {
+  result=$(timeout 3 curl -4 -s "https://api.iplocation.net/?ip=$external_ipv6" | jq -r ".country_code2" 2>/dev/null)
+  [[ $? -eq 124 || "$result" == "null" || ${#result} -gt 7 ]] && echo "" || echo "$result"
+}
+
+ipstack_com_lookup() {
+  api_key="your_ipstack_api_key" # Replace with actual API key
+  result=$(timeout 3 curl -4 -s "http://api.ipstack.com/$external_ip?access_key=$api_key" | jq -r ".country_code" 2>/dev/null)
+  [[ $? -eq 124 || "$result" == "null" || ${#result} -gt 7 ]] && echo "" || echo "$result"
+}
+
+ipstack_com_lookup_v6() {
+  api_key="your_ipstack_api_key" # Replace with actual API key
+  result=$(timeout 3 curl -4 -s "http://api.ipstack.com/$external_ipv6?access_key=$api_key" | jq -r ".country_code" 2>/dev/null)
+  [[ $? -eq 124 || "$result" == "null" || ${#result} -gt 7 ]] && echo "" || echo "$result"
+}
+
 main() {
   install_dependencies
   declare -a results
@@ -544,8 +591,7 @@ main() {
   for service in "${SERVICES[@]}"; do
     IFS=':' read -r domain lookup_function lookup_function_v6 <<< "$service"
     ((current_service++))
-    progress_bar $current_service $total_services
-    printf " Checking: %s" "[$domain]"
+    progress_bar $current_service $total_services "$domain"
     if [ -n "$IPV6_ADDR" ]; then
       check_service "$domain" "$lookup_function" "$lookup_function_v6"
     else
